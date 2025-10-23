@@ -23,7 +23,8 @@
   ],
   "dependencies": {
     "@raycast/api": "^1.103.4",
-    "@raycast/utils": "^1.17.0"
+    "@raycast/utils": "^1.17.0",
+    "fuse.js": "^7.1.0"
   },
   "devDependencies": {
     "@raycast/eslint-config": "^2.0.4",
