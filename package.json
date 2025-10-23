@@ -19,6 +19,12 @@
       "title": "Browse apps",
       "description": "",
       "mode": "view"
+    },
+    {
+      "name": "manage-tags",
+      "title": "Manage Tags",
+      "description": "Create, edit, and delete tags for your applications",
+      "mode": "view"
     }
   ],
   "dependencies": {

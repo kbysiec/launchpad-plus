@@ -25,19 +25,6 @@ interface TagColors {
   [tag: string]: string;
 }
 
-// 🎨 Some pleasant Raycast color palette
-const TAG_COLORS = [
-  Color.Red,
-  Color.Orange,
-  Color.Yellow,
-  Color.Green,
-  Color.Blue,
-  Color.Purple,
-  Color.Magenta,
-  Color.SecondaryText,
-  Color.PrimaryText,
-];
-
 export default function Command() {
   const [allApps, setAllApps] = useState<Application[]>([]);
   const [tags, setTags] = useState<AppTags>({});
@@ -83,22 +70,11 @@ export default function Command() {
     loadTags();
   }, []);
 
-  // 💾 Save tags and assign colors
+  // 💾 Save tags
   async function saveTags(bundleIdOrPath: string, tagList: string[]) {
     const newTags = { ...tags, [bundleIdOrPath]: tagList };
     setTags(newTags);
     await LocalStorage.setItem(bundleIdOrPath, JSON.stringify(tagList));
-
-    // Assign random colors to new tags
-    const newColors = { ...tagColors };
-    for (const t of tagList) {
-      if (!newColors[t]) {
-        const color = TAG_COLORS[Math.floor(Math.random() * TAG_COLORS.length)];
-        newColors[t] = color;
-        await LocalStorage.setItem(`tagcolor:${t}`, color);
-      }
-    }
-    setTagColors(newColors);
   }
 
   // 🔍 Fuzzy search (Fuse.js)
@@ -116,7 +92,7 @@ export default function Command() {
     if (searchText.startsWith("#")) {
       const tagQuery = searchText.slice(1).toLowerCase();
       return allApps.filter((app) =>
-        (tags[app.bundleId ?? app.path] ?? []).some((t) => t.toLowerCase().includes(tagQuery)),
+        (tags[app.bundleId ?? app.path] ?? []).some((t) => t.toLowerCase().includes(tagQuery))
       );
     }
 
@@ -154,9 +130,7 @@ export default function Command() {
 
         const accessories =
           appTags.length > 0
-            ? appTags.map((t) => ({
-                tag: { value: `#${t}`, color: tagColors[t] ?? Color.SecondaryText },
-              }))
+            ? appTags.map((t) => ({ tag: { value: t, color: tagColors[t] ?? Color.SecondaryText } }))
             : [];
 
         return (
@@ -177,6 +151,7 @@ export default function Command() {
                     <TagEditor
                       app={app}
                       existingTags={appTags}
+                      allTags={Object.keys(tagColors)}
                       onSave={(newTags) => saveTags(app.bundleId ?? app.path, newTags)}
                     />
                   }
@@ -203,25 +178,22 @@ export default function Command() {
 function TagEditor({
   app,
   existingTags,
+  allTags,
   onSave,
 }: {
   app: Application;
   existingTags: string[];
+  allTags: string[];
   onSave: (tags: string[]) => void;
 }) {
   const { pop } = useNavigation();
-  const [tagsText, setTagsText] = useState(existingTags.join(", "));
 
-  async function handleSubmit(values: { tags: string }) {
-    const tags = values.tags
-      .split(",")
-      .map((t) => t.trim())
-      .filter(Boolean);
-    await onSave(tags);
+  async function handleSubmit(values: { tags: string[] }) {
+    await onSave(values.tags);
     await showToast({
       style: Toast.Style.Success,
       title: "Tags saved",
-      message: `${tags.length} tag(s) for ${app.name}`,
+      message: `${values.tags.length} tag(s) for ${app.name}`,
     });
     pop();
   }
@@ -235,13 +207,11 @@ function TagEditor({
         </ActionPanel>
       }
     >
-      <Form.TextField
-        id="tags"
-        title="Tags (comma-separated)"
-        placeholder="e.g. productivity, design, browser"
-        value={tagsText}
-        onChange={setTagsText}
-      />
+      <Form.TagPicker id="tags" title="Tags" defaultValue={existingTags}>
+        {allTags.map((tag) => (
+          <Form.TagPicker.Item key={tag} value={tag} title={tag} />
+        ))}
+      </Form.TagPicker>
     </Form>
   );
 }
