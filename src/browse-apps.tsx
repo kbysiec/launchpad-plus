@@ -11,6 +11,7 @@ import {
   Toast,
   useNavigation,
 } from "@raycast/api";
+import EventEmitter from "events";
 import Fuse from "fuse.js";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -32,6 +33,11 @@ interface TagDefinition {
 interface TagDefinitions {
   [id: string]: TagDefinition;
 }
+
+/* -------------------------------------------------------------------------- */
+/*                              Global Event Bus                              */
+/* -------------------------------------------------------------------------- */
+export const TagEvents = new EventEmitter();
 
 /* -------------------------------------------------------------------------- */
 /*                                Root Command                                */
@@ -125,6 +131,7 @@ export default function Command() {
     setTags(newTags);
     await LocalStorage.setItem(bundleIdOrPath, JSON.stringify(tagList));
     await persistRefreshVersion();
+    TagEvents.emit("tagsUpdated");
   }
 
   /* ------------------------------- Create Tag ------------------------------ */
@@ -144,6 +151,7 @@ export default function Command() {
     await persistTagOrder(order);
 
     await persistRefreshVersion();
+    TagEvents.emit("tagsUpdated");
     await showToast(Toast.Style.Success, "Tag Created", `Added ${name}`);
   }
 
@@ -158,17 +166,16 @@ export default function Command() {
     setTagDefinitions(defs);
 
     await persistRefreshVersion();
+    TagEvents.emit("tagsUpdated");
     await showToast(Toast.Style.Success, "Tag Updated", `Updated ${newName}`);
   }
 
   /* ------------------------------- Delete Tag ------------------------------ */
   async function deleteTag(id: string) {
-    // Load latest definitions
     const defsStr = await LocalStorage.getItem<string>(TAG_DEFINITIONS_KEY);
     const defs: TagDefinitions = defsStr ? JSON.parse(defsStr) : {};
     delete defs[id];
 
-    // Remove tag from apps
     const updatedTags: AppTags = { ...tags };
     for (const key in updatedTags) {
       const current = updatedTags[key];
@@ -179,17 +186,16 @@ export default function Command() {
     }
     setTags(updatedTags);
 
-    // Update order safely
     const orderStr = await LocalStorage.getItem<string>(TAG_ORDER_KEY);
     let order: string[] = orderStr ? JSON.parse(orderStr) : [];
     order = order.filter((tagId) => tagId !== id);
     await persistTagOrder(order);
 
-    // Save merged definitions
     await LocalStorage.setItem(TAG_DEFINITIONS_KEY, JSON.stringify(defs));
     setTagDefinitions(defs);
 
     await persistRefreshVersion();
+    TagEvents.emit("tagsUpdated");
     await showToast(Toast.Style.Success, "Tag Deleted", "Tag removed successfully");
   }
 
@@ -286,10 +292,8 @@ function TagEditor({
   const [tagDefinitions, setTagDefinitions] = useState<TagDefinitions>({});
   const [availableTagIds, setAvailableTagIds] = useState<string[]>(tagOrder);
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
-  const [pickerVersion, setPickerVersion] = useState(0);
+  const [formVersion, setFormVersion] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
-
-  const bumpPicker = () => setPickerVersion((v) => v + 1);
 
   const loadFromStorage = useCallback(async () => {
     const stored = await LocalStorage.allItems();
@@ -319,46 +323,90 @@ function TagEditor({
       try {
         const parsed = JSON.parse(raw as string);
         if (Array.isArray(parsed)) setSelectedTagIds(parsed);
-        // eslint-disable-next-line no-empty
-      } catch {}
+      } catch {
+        /* ignore */
+      }
     }
 
     setIsLoading(false);
-    bumpPicker();
   }, [app.bundleId, app.path, tagOrder]);
 
+  // ✅ Initial load + listener for external changes
   useEffect(() => {
     loadFromStorage();
+
+    const handler = async () => {
+      await loadFromStorage();
+      setFormVersion((v) => v + 1);
+    };
+
+    TagEvents.on("tagsUpdated", handler);
+
+    // ✅ Proper cleanup — return a function that *calls* off(), not returns it
+    return () => {
+      TagEvents.off("tagsUpdated", handler);
+    };
   }, [loadFromStorage]);
 
-  async function handleSubmit(values: { tags: string[] }) {
-    await onSave(values.tags);
+  useEffect(() => {
+    const onBackReload = async () => {
+      console.log("♻️ Reloading tags after returning from ManageTags");
+      await loadFromStorage();
+      setFormVersion((v) => v + 1);
+    };
+
+    TagEvents.on("tagsReload", onBackReload);
+
+    // ✅ Return a function that calls .off() but doesn't return anything
+    return () => {
+      TagEvents.off("tagsReload", onBackReload);
+    };
+  }, [loadFromStorage]);
+
+  async function handleSubmit(values: Record<string, string[]>) {
+    const tags = values["tags"] ?? [];
+    await onSave(tags);
     await showToast({ style: Toast.Style.Success, title: "Tags saved" });
     pop();
   }
 
+  // ✅ Don’t pop here; reload only happens when you go back
   async function createLocal(name: string, color: string) {
     await onCreateGlobal(name, color);
     await new Promise((r) => setTimeout(r, 150));
-    await loadFromStorage();
+    TagEvents.emit("tagsReload");
   }
 
   async function editLocal(id: string, newName: string, newColor: string) {
     await onEditGlobal(id, newName, newColor);
     await new Promise((r) => setTimeout(r, 150));
-    await loadFromStorage();
+    TagEvents.emit("tagsReload");
   }
 
   async function deleteLocal(id: string) {
     await onDeleteGlobal(id);
     await new Promise((r) => setTimeout(r, 150));
-    await loadFromStorage();
+    TagEvents.emit("tagsReload");
   }
 
   if (isLoading) return <List isLoading navigationTitle={`Tags for ${app.name}`} />;
 
+  const tagItems = availableTagIds
+    .map((tagId) => {
+      const def = tagDefinitions[tagId];
+      if (!def) return null;
+      return {
+        id: tagId,
+        key: `${tagId}-${def.name}-${def.color}-${formVersion}`,
+        name: def.name,
+        color: def.color,
+      };
+    })
+    .filter(Boolean);
+
   return (
     <Form
+      key={`form-${formVersion}`}
       navigationTitle={`Tags for ${app.name}`}
       actions={
         <ActionPanel>
@@ -366,24 +414,27 @@ function TagEditor({
           <Action.Push
             title="Manage Tags"
             icon={Icon.Gear}
-            target={<ManageTags onCreate={createLocal} onEdit={editLocal} onDelete={deleteLocal} />}
+            target={
+              <ManageTags
+                onCreate={createLocal}
+                onEdit={editLocal}
+                onDelete={deleteLocal}
+                onWillDisappear={() => TagEvents.emit("tagsReload")}
+              />
+            }
           />
         </ActionPanel>
       }
     >
-      <Form.TagPicker id="tags" key={pickerVersion} title="Tags" value={selectedTagIds} onChange={setSelectedTagIds}>
-        {availableTagIds.map((tagId) => {
-          const def = tagDefinitions[tagId];
-          if (!def) return null;
-          return (
-            <Form.TagPicker.Item
-              key={`${pickerVersion}-${tagId}`}
-              value={tagId}
-              title={def.name}
-              icon={{ source: Icon.Tag, tintColor: def.color }}
-            />
-          );
-        })}
+      <Form.TagPicker id="tags" title="Tags" value={selectedTagIds} onChange={setSelectedTagIds}>
+        {tagItems.map((item) => (
+          <Form.TagPicker.Item
+            key={item!.key}
+            value={item!.id}
+            title={item!.name}
+            icon={{ source: Icon.Tag, tintColor: item!.color }}
+          />
+        ))}
       </Form.TagPicker>
     </Form>
   );
@@ -397,12 +448,23 @@ function ManageTags({
   onCreate,
   onEdit,
   onDelete,
+  onWillDisappear,
 }: {
   onCreate: (name: string, color: string) => void;
   onEdit: (id: string, newName: string, newColor: string) => void;
   onDelete: (id: string) => void;
+  onWillDisappear?: () => void;
 }) {
   const [tagDefinitions, setTagDefinitions] = useState<TagDefinitions>({});
+
+  useEffect(() => {
+    // Return a cleanup function that runs when this component is unmounted (when user presses Esc/back)
+    return () => {
+      if (onWillDisappear) {
+        onWillDisappear();
+      }
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
