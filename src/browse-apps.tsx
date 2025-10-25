@@ -521,7 +521,7 @@ function ManageTags({
 function CreateTagForm({ onCreate }: { onCreate: (name: string, color: string) => void }) {
   const { pop } = useNavigation();
   const [name, setName] = useState("");
-  const [color, setColor] = useState("#FF0000");
+  const [color, setColor] = useState(randomColor());
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   async function handle() {
@@ -606,4 +606,8 @@ function EditTagForm({
 
 function generateId(): string {
   return `tag_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+}
+
+function randomColor() {
+  return `#${Math.floor(Math.random() * 16777215).toString(16)}`;
 }
