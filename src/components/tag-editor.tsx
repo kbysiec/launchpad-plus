@@ -11,8 +11,8 @@ import {
   useNavigation,
 } from "@raycast/api";
 import { useCallback, useEffect, useState } from "react";
-import { TagEvents } from "../browse-apps";
 import { TAG_DEFINITIONS_KEY, TAG_ORDER_KEY } from "../contants";
+import { TagEvents } from "../helpers";
 import { TagDefinitions } from "../types";
 import { TagsManager } from "./tags-manager";
 

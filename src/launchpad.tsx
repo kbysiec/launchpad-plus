@@ -9,18 +9,12 @@ import {
   showToast,
   Toast,
 } from "@raycast/api";
-import EventEmitter from "events";
 import Fuse from "fuse.js";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { TagEditor } from "./components/tag-editor";
 import { PAGE_SIZE, REFRESH_KEY, TAG_DEFINITIONS_KEY, TAG_ORDER_KEY } from "./contants";
-import { generateId } from "./helpers";
+import { generateId, TagEvents } from "./helpers";
 import { AppTags, TagDefinitions } from "./types";
-
-/* -------------------------------------------------------------------------- */
-/*                              Global Event Bus                              */
-/* -------------------------------------------------------------------------- */
-export const TagEvents = new EventEmitter();
 
 /* -------------------------------------------------------------------------- */
 /*                                Root Command                                */
