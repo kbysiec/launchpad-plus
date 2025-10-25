@@ -1,5 +1,6 @@
 import { Action, ActionPanel, Form, showToast, Toast, useNavigation } from "@raycast/api";
 import { useState } from "react";
+import { isValidHexColor } from "../helpers";
 import { TagDefinition } from "../types";
 
 export function EditTagForm({
@@ -22,12 +23,12 @@ export function EditTagForm({
       setIsSubmitting(false);
       return;
     }
-    if (!/^#[0-9A-F]{6}$/i.test(color)) {
+    if (!isValidHexColor(color)) {
       await showToast(Toast.Style.Failure, "Invalid HEX color", "Use #RRGGBB like #00FF00");
       setIsSubmitting(false);
       return;
     }
-    await onEdit(tagDef.id, name, color);
+    await onEdit(tagDef.id, name.trim(), color);
     pop();
   }
 

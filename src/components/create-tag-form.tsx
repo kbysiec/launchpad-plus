@@ -1,6 +1,6 @@
 import { Action, ActionPanel, Form, showToast, Toast, useNavigation } from "@raycast/api";
 import { useState } from "react";
-import { randomColor } from "../helpers";
+import { isValidHexColor, randomColor } from "../helpers";
 
 export function CreateTagForm({ onCreate }: { onCreate: (name: string, color: string) => void }) {
   const { pop } = useNavigation();
@@ -16,12 +16,12 @@ export function CreateTagForm({ onCreate }: { onCreate: (name: string, color: st
       setIsSubmitting(false);
       return;
     }
-    if (!/^#[0-9A-F]{6}$/i.test(color)) {
+    if (!isValidHexColor(color)) {
       await showToast(Toast.Style.Failure, "Invalid HEX color", "Use #RRGGBB like #FF0000");
       setIsSubmitting(false);
       return;
     }
-    await onCreate(name, color);
+    await onCreate(name.trim(), color);
     pop();
   }
 
