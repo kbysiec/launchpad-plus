@@ -36,13 +36,53 @@ export default function Command() {
   const [isLoading, setIsLoading] = useState(true);
   const [refreshVersion, setRefreshVersion] = useState<string | null>(null);
 
-  /* ------------------------------ Load Data ------------------------------ */
-  const loadData = useCallback(async () => {
-    setIsLoading(true);
+  /* ---------------------------------------------------------------------- */
+  /*              🚀 1. Load cached data immediately (no delay)              */
+  /* ---------------------------------------------------------------------- */
+  useEffect(() => {
+    (async () => {
+      const stored = await LocalStorage.allItems();
+      const cachedTags: AppTags = {};
+      let defs: TagDefinitions = {};
+      let order: string[] = [];
 
+      if (stored[TAG_DEFINITIONS_KEY]) {
+        try {
+          defs = JSON.parse(stored[TAG_DEFINITIONS_KEY] as string);
+          // eslint-disable-next-line no-empty
+        } catch {}
+      }
+      if (stored[TAG_ORDER_KEY]) {
+        try {
+          order = JSON.parse(stored[TAG_ORDER_KEY] as string);
+          // eslint-disable-next-line no-empty
+        } catch {}
+      }
+      for (const [key, value] of Object.entries(stored)) {
+        if ([TAG_DEFINITIONS_KEY, TAG_ORDER_KEY, REFRESH_KEY].includes(key)) continue;
+        try {
+          const parsed = JSON.parse(value as string);
+          if (Array.isArray(parsed)) cachedTags[key] = parsed;
+          // eslint-disable-next-line no-empty
+        } catch {}
+      }
+
+      const allTagIds = Object.keys(defs);
+      if (order.length === 0) order = allTagIds;
+      else order = [...order.filter((id) => allTagIds.includes(id)), ...allTagIds.filter((id) => !order.includes(id))];
+
+      setTags(cachedTags);
+      setTagDefinitions(defs);
+      setTagOrder(order);
+    })();
+  }, []);
+
+  /* ---------------------------------------------------------------------- */
+  /*              🚀 2. Async refresh (apps and latest data)                */
+  /* ---------------------------------------------------------------------- */
+  const loadData = useCallback(async () => {
     const installedApps = await getApplications();
     installedApps.sort((a, b) => a.name.localeCompare(b.name));
-    setAllApps(installedApps);
 
     const stored = await LocalStorage.allItems();
     const parsedTags: AppTags = {};
@@ -52,17 +92,15 @@ export default function Command() {
     if (stored[TAG_DEFINITIONS_KEY]) {
       try {
         definitions = JSON.parse(stored[TAG_DEFINITIONS_KEY] as string);
-      } catch {
-        definitions = {};
-      }
+        // eslint-disable-next-line no-empty
+      } catch {}
     }
 
     if (stored[TAG_ORDER_KEY]) {
       try {
         order = JSON.parse(stored[TAG_ORDER_KEY] as string);
-      } catch {
-        order = [];
-      }
+        // eslint-disable-next-line no-empty
+      } catch {}
     }
 
     for (const [key, value] of Object.entries(stored)) {
@@ -78,6 +116,7 @@ export default function Command() {
     if (order.length === 0) order = allTagIds;
     else order = [...order.filter((id) => allTagIds.includes(id)), ...allTagIds.filter((id) => !order.includes(id))];
 
+    setAllApps(installedApps);
     setTags(parsedTags);
     setTagDefinitions(definitions);
     setTagOrder(order);
@@ -88,6 +127,9 @@ export default function Command() {
     loadData();
   }, [loadData]);
 
+  /* ---------------------------------------------------------------------- */
+  /*                🔄 Periodic background refresh watcher                   */
+  /* ---------------------------------------------------------------------- */
   useEffect(() => {
     const interval = setInterval(async () => {
       const version = await LocalStorage.getItem<string>(REFRESH_KEY);
@@ -99,6 +141,9 @@ export default function Command() {
     return () => clearInterval(interval);
   }, [refreshVersion, loadData]);
 
+  /* ---------------------------------------------------------------------- */
+  /*                         Persistence helpers                            */
+  /* ---------------------------------------------------------------------- */
   async function persistRefreshVersion() {
     await LocalStorage.setItem(REFRESH_KEY, Date.now().toString());
   }
@@ -108,7 +153,9 @@ export default function Command() {
     await LocalStorage.setItem(TAG_ORDER_KEY, JSON.stringify(order));
   }
 
-  /* ------------------------------- App Tags ------------------------------- */
+  /* ---------------------------------------------------------------------- */
+  /*                         CRUD Tag Operations                             */
+  /* ---------------------------------------------------------------------- */
   async function saveTags(bundleIdOrPath: string, tagList: string[]) {
     const newTags = { ...tags, [bundleIdOrPath]: tagList };
     setTags(newTags);
@@ -117,14 +164,11 @@ export default function Command() {
     TagEvents.emit("tagsUpdated");
   }
 
-  /* ------------------------------- Create Tag ------------------------------ */
   async function createTag(name: string, color: string) {
     const id = generateId();
-
     const defsStr = await LocalStorage.getItem<string>(TAG_DEFINITIONS_KEY);
     const defs: TagDefinitions = defsStr ? JSON.parse(defsStr) : {};
     defs[id] = { id, name, color };
-
     await LocalStorage.setItem(TAG_DEFINITIONS_KEY, JSON.stringify(defs));
     setTagDefinitions(defs);
 
@@ -138,27 +182,22 @@ export default function Command() {
     await showToast(Toast.Style.Success, "Tag Created", `Added ${name}`);
   }
 
-  /* -------------------------------- Edit Tag ------------------------------- */
   async function editTag(id: string, newName: string, newColor: string) {
     const defsStr = await LocalStorage.getItem<string>(TAG_DEFINITIONS_KEY);
     const defs: TagDefinitions = defsStr ? JSON.parse(defsStr) : {};
     if (!defs[id]) return;
-
     defs[id] = { id, name: newName, color: newColor };
     await LocalStorage.setItem(TAG_DEFINITIONS_KEY, JSON.stringify(defs));
     setTagDefinitions(defs);
-
     await persistRefreshVersion();
     TagEvents.emit("tagsUpdated");
     await showToast(Toast.Style.Success, "Tag Updated", `Updated ${newName}`);
   }
 
-  /* ------------------------------- Delete Tag ------------------------------ */
   async function deleteTag(id: string) {
     const defsStr = await LocalStorage.getItem<string>(TAG_DEFINITIONS_KEY);
     const defs: TagDefinitions = defsStr ? JSON.parse(defsStr) : {};
     delete defs[id];
-
     const updatedTags: AppTags = { ...tags };
     for (const key in updatedTags) {
       const current = updatedTags[key];
@@ -168,21 +207,20 @@ export default function Command() {
       }
     }
     setTags(updatedTags);
-
     const orderStr = await LocalStorage.getItem<string>(TAG_ORDER_KEY);
     let order: string[] = orderStr ? JSON.parse(orderStr) : [];
     order = order.filter((tagId) => tagId !== id);
     await persistTagOrder(order);
-
     await LocalStorage.setItem(TAG_DEFINITIONS_KEY, JSON.stringify(defs));
     setTagDefinitions(defs);
-
     await persistRefreshVersion();
     TagEvents.emit("tagsUpdated");
     await showToast(Toast.Style.Success, "Tag Deleted", "Tag removed successfully");
   }
 
-  /* ------------------------------ Search Logic ----------------------------- */
+  /* ---------------------------------------------------------------------- */
+  /*                             Search + Paging                            */
+  /* ---------------------------------------------------------------------- */
   const fuse = useMemo(() => new Fuse(allApps, { keys: ["name"], threshold: 0.4 }), [allApps]);
   const filteredApps = useMemo(() => {
     if (!searchText) return allApps;
@@ -199,6 +237,9 @@ export default function Command() {
   const visibleApps = filteredApps.slice(0, visibleCount);
   useEffect(() => setVisibleCount(PAGE_SIZE), [searchText]);
 
+  /* ---------------------------------------------------------------------- */
+  /*                               Render                                   */
+  /* ---------------------------------------------------------------------- */
   return (
     <List
       isLoading={isLoading}
@@ -218,10 +259,11 @@ export default function Command() {
         const accessories = appTagIds
           .map((id) => tagDefinitions[id])
           .filter(Boolean)
-          .map((def) => ({ tag: { value: def!.name, color: def!.color } }));
+          .map((def) => ({ tag: { value: def!.name, color: def!.color, tooltip: def!.name } }));
 
         return (
           <List.Item
+            id={app.path}
             key={app.path}
             title={app.name}
             icon={{ fileIcon: app.path }}
