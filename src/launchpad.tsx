@@ -6,6 +6,7 @@ import {
   Icon,
   List,
   LocalStorage,
+  open,
   showToast,
   Toast,
 } from "@raycast/api";
@@ -157,6 +158,34 @@ export default function Command() {
   useEffect(() => setVisibleCount(PAGE_SIZE), [searchText]);
 
   /* ---------------------------------------------------------------------- */
+  /*                    🧩 Open All if Exact Tag Matched                    */
+  /* ---------------------------------------------------------------------- */
+  const matchedTagId = searchText.startsWith("#")
+    ? Object.keys(tagDefinitions).find(
+        (id) => tagDefinitions[id].name.toLowerCase() === searchText.slice(1).toLowerCase(),
+      )
+    : undefined;
+
+  async function handleOpenAll() {
+    if (!matchedTagId) return;
+    const appsToOpen = allApps.filter((a) => (tags[a.bundleId ?? a.path] ?? []).includes(matchedTagId));
+    if (appsToOpen.length === 0) {
+      await showToast(Toast.Style.Failure, "No apps found for this tag");
+      return;
+    }
+
+    await showToast(Toast.Style.Animated, `Opening ${appsToOpen.length} apps...`);
+    for (const app of appsToOpen) {
+      try {
+        await open(app.path);
+      } catch (err) {
+        console.error(`Failed to open ${app.name}`, err);
+      }
+    }
+    await showToast(Toast.Style.Success, `Opened ${appsToOpen.length} app(s)`);
+  }
+
+  /* ---------------------------------------------------------------------- */
   /*                               Render                                   */
   /* ---------------------------------------------------------------------- */
   return (
@@ -189,6 +218,14 @@ export default function Command() {
             accessories={accessories}
             actions={
               <ActionPanel>
+                {matchedTagId && (
+                  <Action
+                    title="Open All Apps with This Tag"
+                    icon={Icon.Play}
+                    onAction={handleOpenAll}
+                    shortcut={{ modifiers: ["cmd"], key: "enter" }}
+                  />
+                )}
                 <Action.Open title="Open App" target={app.path} />
                 <Action.Push
                   title="Edit Tags"
