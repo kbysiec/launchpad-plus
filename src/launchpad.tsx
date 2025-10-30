@@ -10,12 +10,16 @@ import {
   showToast,
   Toast,
 } from "@raycast/api";
+import { exec } from "child_process";
 import Fuse from "fuse.js";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { promisify } from "util";
 import { TagEditor } from "./components/tag-editor";
 import { PAGE_SIZE, REFRESH_KEY, TAG_DEFINITIONS_KEY, TAG_ORDER_KEY } from "./constants";
 import { generateId, loadStoredTags, TagEvents } from "./helpers";
 import { AppTags, TagDefinitions } from "./types";
+
+const execAsync = promisify(exec);
 
 /* -------------------------------------------------------------------------- */
 /*                                Root Command                                */
@@ -158,7 +162,7 @@ export default function Command() {
   useEffect(() => setVisibleCount(PAGE_SIZE), [searchText]);
 
   /* ---------------------------------------------------------------------- */
-  /*                    🧩 Open All if Exact Tag Matched                    */
+  /*               🧩 Open / Close All if Exact Tag Matched                 */
   /* ---------------------------------------------------------------------- */
   const matchedTagId = searchText.startsWith("#")
     ? Object.keys(tagDefinitions).find(
@@ -183,6 +187,25 @@ export default function Command() {
       }
     }
     await showToast(Toast.Style.Success, `Opened ${appsToOpen.length} app(s)`);
+  }
+
+  async function handleCloseAll() {
+    if (!matchedTagId) return;
+    const appsToClose = allApps.filter((a) => (tags[a.bundleId ?? a.path] ?? []).includes(matchedTagId));
+    if (appsToClose.length === 0) {
+      await showToast(Toast.Style.Failure, "No apps found for this tag");
+      return;
+    }
+
+    await showToast(Toast.Style.Animated, `Closing ${appsToClose.length} apps...`);
+    for (const app of appsToClose) {
+      try {
+        await execAsync(`osascript -e 'tell application "${app.name}" to quit'`);
+      } catch (err) {
+        console.error(`Failed to close ${app.name}`, err);
+      }
+    }
+    await showToast(Toast.Style.Success, `Closed ${appsToClose.length} app(s)`);
   }
 
   /* ---------------------------------------------------------------------- */
@@ -218,14 +241,6 @@ export default function Command() {
             accessories={accessories}
             actions={
               <ActionPanel>
-                {matchedTagId && (
-                  <Action
-                    title="Open All Apps with This Tag"
-                    icon={Icon.Play}
-                    onAction={handleOpenAll}
-                    shortcut={{ modifiers: ["cmd"], key: "enter" }}
-                  />
-                )}
                 <Action.Open title="Open App" target={app.path} />
                 <Action.Push
                   title="Edit Tags"
@@ -241,6 +256,24 @@ export default function Command() {
                     />
                   }
                 />
+                {matchedTagId && (
+                  <>
+                    <ActionPanel.Section>
+                      <Action
+                        title="Open All Apps with Tag"
+                        icon={Icon.Play}
+                        onAction={handleOpenAll}
+                        shortcut={{ modifiers: ["cmd"], key: "o" }}
+                      />
+                      <Action
+                        title="Close All Apps with Tag"
+                        icon={Icon.XMarkCircle}
+                        onAction={handleCloseAll}
+                        shortcut={{ modifiers: ["cmd", "shift"], key: "o" }}
+                      />
+                    </ActionPanel.Section>
+                  </>
+                )}
               </ActionPanel>
             }
           />
